@@ -3,6 +3,7 @@ import deepl
 #from googletrans import Translator, LANGUAGES
 import os
 import re
+import pandas as pd
 
 def remove_custom_emojis(text):
     # Pattern to match custom Discord emojis: <:name:id>
@@ -14,17 +15,51 @@ def remove_custom_emojis(text):
     # Remove Unicode emojis
     return text
 
-def translate(clean_text):
+def check_if_language_identicial(source, target):
+    if source == "EN" and target in ["EN-US", "EN-GB"]:
+        return True
+    else:
+        return (source ==target)
+    
+def translate(clean_text, glossaries):
     translated_sentences = []
     #for lang in language_table:
-    for lang in language_table_deepl:  
+    source_lang = translator.translate_text(clean_text, target_lang="ZH").detected_source_lang
+    
+    if source_lang == "EN-US" or source_lang == "EN-GB":
+        source_lang = "EN"
+
+    if source_lang in source_language_table_deepl:
+        glossaries_active = True
+    else:
+        glossaries_active = False
+        print(f"source_lang not found:{source_lang}")
+    #glossaries_active = False
+    
+    #print(glossaries_active, source_lang)
+    for target_lang in target_language_table_deepl:  
         #print(translated_text)
         #tmp = translator.translate(clean_text, dest=lang).text
-        tmp = translator.translate_text(clean_text, target_lang=lang).text
 
-        if (tmp != clean_text) and (tmp not in translated_sentences):
+        if not check_if_language_identicial(source_lang, target_lang):
+            if glossaries_active:
+                print(source_lang, target_lang)
+                print("denden")
+                g = glossaries[source_lang][target_lang]
+                
+                print(source_lang, target_lang)
+                print("denden")
+                print(g.source_lang, g.target_lang)
+                print(g)
+                tmp = translator.translate_text(clean_text, source_lang=source_lang, target_lang=target_lang, glossary=g, ).text
 
-            translated_sentences.append(tmp)
+            else:
+                tmp = translator.translate_text(clean_text, target_lang=target_lang).text
+       
+            
+            if (tmp != clean_text) and (tmp not in translated_sentences):
+
+                translated_sentences.append(tmp)
             
     
     translated_text = "\n".join(translated_sentences)
@@ -33,6 +68,7 @@ def translate(clean_text):
 def preprocessing(content):
     clean_text = remove_custom_emojis(content)
     return clean_text
+
 
 auth_key = "4f689c4c-1231-4c4b-956c-0c41f55626a0:fx"  # Replace with your key
 translator = deepl.Translator(auth_key)
@@ -43,7 +79,8 @@ translator = deepl.Translator(auth_key)
 
 role_language_table = {"Chinese": "zh-cn", "English": "en", "Japanese": "ja"}
 language_table = ["zh-cn", "en", "ja"]
-language_table_deepl = ["ZH", "EN-US", "JA"]
+source_language_table_deepl = ["ZH", "EN", "JA"]
+target_language_table_deepl = ["ZH", "EN-US", "JA"]
 # Create discord client
 
 intents = discord.Intents.default()
@@ -53,6 +90,38 @@ client = discord.Client(intents=intents)
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 stored_replies = {}
+
+df = pd.read_csv("GITCG_Glossary.csv", header=0, encoding='GBK')
+dict_cn_to_en = df[['中文','English']].dropna().set_index('中文')['English'].dropna().to_dict()
+dict_cn_to_jp = df[['中文','日本語']].dropna().set_index('中文')['日本語'].dropna().to_dict()
+dict_en_to_jp = df[['English','日本語']].dropna().set_index('English')['日本語'].dropna().to_dict()
+dict_en_to_cn = df[['English','中文']].dropna().set_index('English')['中文'].dropna().to_dict()
+dict_jp_to_cn = df[['日本語','中文']].dropna().set_index('日本語')['中文'].to_dict()
+dict_jp_to_en = df[['日本語','English']].dropna().set_index('日本語')['English'].to_dict()
+
+
+
+# print("中文到英文的字典:", dict_cn_to_en)
+# print("中文到日语的字典:", dict_jp_to_en)
+
+# source_lang = "EN"  # 源语言
+# target_lang = "DE"  # 目标语言
+# entries = {"artificial intelligence": "Künstliche Intelligenz"}  # 词条映射
+#glossary = translator.create_glossary("GITCG_cn_to_en", source_lang, target_lang, dict_cn_to_en)
+glossaries = {"EN":{}, "ZH":{}, "JA":{}}
+glossaries['EN']["ZH"] = translator.create_glossary("GITCG_en_to_cn", 'EN', 'ZH', dict_en_to_cn)
+# print("The source language is")
+# print(glossaries['EN-US']["ZH"].source_lang)
+
+
+
+glossaries['EN']["JA"] = translator.create_glossary("GITCG_en_to_jp", 'EN', 'JA', dict_en_to_jp )
+glossaries['ZH']["EN-US"] = translator.create_glossary("GITCG_cn_to_en", 'ZH', 'EN-US', dict_cn_to_en )
+glossaries['ZH']["JA"] = translator.create_glossary("GITCG_cn_to_jp", 'ZH', 'JA', dict_cn_to_jp )
+glossaries['JA']["EN-US"] = translator.create_glossary("GITCG_jp_to_en", 'JA', 'EN-US', dict_jp_to_en )
+glossaries['JA']["ZH"] = translator.create_glossary("GITCG_jp_to_cn", 'JA', 'ZH', dict_jp_to_cn )
+
+
 
 @client.event
 async def on_ready():
@@ -88,7 +157,7 @@ async def on_message(message):
     
     # Translate the message
     #translated_text = ""
-    translated_text = translate(clean_text)
+    translated_text = translate(clean_text,glossaries)
     
     # Send the translated message
     if not translated_text:
@@ -125,7 +194,7 @@ async def on_message_edit(before, after):
         # Modify the reply based on the new content of the original message
 
         clean_text = preprocessing(after.clean_content)
-        new_reply_content = translate(clean_text)
+        new_reply_content = translate(clean_text, glossaries)
 
         stored_replies.pop(before.id)
 
