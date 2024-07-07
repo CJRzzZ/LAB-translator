@@ -2,3 +2,4 @@ regex
 discord.py
 deepl
 googletrans
+pandas
